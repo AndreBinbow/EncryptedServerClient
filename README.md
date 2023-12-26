@@ -12,3 +12,4 @@ To connect to a server, running the python script will ask for an input for the 
 The obfuscation is done using an XOR function, which takes the secret string provided, and turns that and your message into a binary string. They are both brought to the same length by repeated material to make up the difference, so sending short messages may cause slightly incorrect decoding based on the length of the secret chosen. This XOR'd binary is converted to base 64 for less characters to transmit, then is turned into utf-8 and sent to the server. 
 
 When a client receieves a message from the server, if the same secret key is used when connecting, the message will undergo the same XOR function, and will turn out the same message again as XORing an XOR will give you the original result. 
+
