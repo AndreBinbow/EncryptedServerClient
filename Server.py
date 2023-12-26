@@ -1,122 +1,116 @@
 import socket
-import threading
+import signal
 import sys
-import base64
+import threading
 
-password = "SECRET"
 
-def string_to_binary(input_string):
-    binary_representation = ''.join(format(ord(char), '08b') for char in input_string)
-    return binary_representation
 
-def xor(message, xor_key):
-    xorbin = string_to_binary(xor_key)
-    messagebin = string_to_binary(message)
-   
-    # Repeat the message or key to match the length of the longer one
-    max_len = max(len(messagebin), len(xorbin))
-    messagebin = (messagebin * ((max_len // len(messagebin)) + 1))[:max_len]
-    xorbin = (xorbin * ((max_len // len(xorbin)) + 1))[:max_len]
-   
-    result = ''.join('1' if a != b else '0' for a, b in zip(messagebin, xorbin))
-    return result
+clientlist = []
+iptonickname = {}
+#clienttoid = {}
+clientlist_lock = threading.Lock()
 
-def binary_to_base64(binary_string):
-    return base64.b64encode(int(binary_string, 2).to_bytes((len(binary_string) + 7) // 8, byteorder='big')).decode('utf-8')
-def binary_to_string(binary_string):
-    # Make sure the binary string is a multiple of 8
-    binary_string = binary_string.zfill((len(binary_string) + 7) // 8 * 8)
+def sendmessages(client, clienttoid, clientlist_lock):
+    exiting = False
+    client_id = f"{client.getpeername()[0]}-{id(client)}"
+    with clientlist_lock:
+        clienttoid[client.getpeername()[0]] = client_id
+    while not exiting:
+        try:
+            if not exiting:
+                data = client.recv(1024).decode('utf-8')
+            if not data:
+                break
 
-    # Split the binary string into 8-bit chunks
-    chunks = [binary_string[i:i+8] for i in range(0, len(binary_string), 8)]
-
-    # Convert each 8-bit chunk to an integer and then to a character
-    characters = [chr(int(chunk, 2)) for chunk in chunks]
-
-    # Join the characters to form the resulting string
-    resulting_string = ''.join(characters)
-
-    return resulting_string
-
-def base64_to_binary(base64_data):
-    # Decode Base64 to bytes
-    byte_data = base64.b64decode(base64_data)
-
-    # Convert bytes to binary string
-    binary_data = ''.join(format(byte, '08b') for byte in byte_data)
-
-    return binary_data
-
-def xor_decrypt(ciphertext, xor_key):
-    xorbin = string_to_binary(xor_key)
-    max_len = len(ciphertext)
-    xorbin = (xorbin * ((max_len // len(xorbin)) + 1))[:max_len]
-
-    result = ''.join('1' if a != b else '0' for a, b in zip(ciphertext, xorbin))
-    return result
-
-def receivemessages(socket):
-    while True:
-        data = socket.recv(1024).decode('utf-8')
-        if not data:
-            print("breaking")
-            break
-        parts = data.split(":")
-        if len(parts) == 2:
-            sender, encrypted_message = parts
-            decrypted_binary = xor_decrypt(base64_to_binary(encrypted_message), password)
-            decrypted_message = binary_to_string(decrypted_binary)
-            #print("server message:", encrypted_message)
-            #print("xordecrypt:", decrypted_binary)
-            print("Decrypted message: ", decrypted_message)
-
-def sendmessages(socket):
-    while True:
-        message = input("")
+            sender_ip = client.getpeername()[0]
+            username = sender_ip
            
-        if message == 'exit':
-            socket.send(message.encode('utf-8'))
-            socket.close()
-            break  
-        elif not message:
-           continue
-           
-        else:
-            try:
-                encrypted_messagesend = xor(message, password).strip()
-                base64message = binary_to_base64(encrypted_messagesend)
-                strippedbase64 = base64message.strip()
-                #print("base64send:",base64message)
-                socket.send(base64message.encode('utf-8'))
-                decrypted_binary = xor_decrypt(base64_to_binary(base64message), password)
-                #print("xordecrypt: ", decrypted_binary)
-                #print("localdecrypt:",binary_to_string(decrypted_binary))
-                #print("mydecryption: "+binary_to_string(xor_decrypt(encrypted_messagesend, password)))
-            except Exception as e:
-                print(e)
-
-
-   
+            if data.strip().startswith("/nick"):
+                iptonickname[sender_ip] = data.split(" ")[1]
+                print(data.split(" ")[1])
            
            
+            if sender_ip in iptonickname:
+                username = iptonickname[sender_ip]
+               
+            ipmessage = f"{client_id}: {data}"
+            print(f"dictionary: {clienttoid}")
+            with clientlist_lock:
+                clients_copy = list(clientlist)
+                try:
+                    print(ipmessage)
+                    for c in clients_copy:
+                        c.send(ipmessage.encode('utf-8'))
+                        if data == 'exit':
+                            print(f"Client {c.getpeername()[0]} disconnected gracefully.")
+                            clientlist.remove(c)
+                            c.close()
+                            exiting = True
+                except ConnectionAbortedError:
+                    print(f"{c.getpeername()[0]} disconnected uncleanly")
+                    clientlist.remove(c)
+                    c.close()
+                    exiting = True
+                    break
+                except ConnectionResetError:
+                    print(f"Client {c.getpeername()[0]} forcibly closed the connection.")
+                    clientlist.remove(c)
+                    c.close()
+                    exiting = True
+                    break
+                except OSError as e:
+                    if "Transport endpoint is not connected" in str(e):
+                        print(f"Client {sender_ip} is not connected. Closing the connection.")
+                        clientlist.remove(c)
+                        c.close()
+                        break
+                    else:
+                        print(f"Error trying to send to {sender_ip}: {str(e)}")
+        except ConnectionAbortedError:
+            print(f"Client {client.getpeername()[0]} disconnected uncleanly")
+            with clientlist_lock:
+                clientlist.remove(client)
+            client.close()
+            exiting = True
+        except ConnectionResetError:
+            print(f"Client {client.getpeername()[0]} forcibly closed the connection.")
+            with clientlist_lock:
+                clientlist.remove(client)
+            client.close()
+            exiting = True
+        except Exception as e:
+            print(f"Error trying to send to {client} {str(e)}")
+            with clientlist_lock:
+                clientlist.remove(client)
+            client.close()
+            exiting = True
+
 
 def main():
-    client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-   
+    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+
+
     host = '0.0.0.0'
     port = 5557
-    try:
-        client.connect((host, port))
-           
-        receivethread = threading.Thread(target = receivemessages, args = (client,))
-        sendthread = threading.Thread(target=sendmessages, args=(client,))
+    server.bind((host, port))
+    server.listen(5)
 
-        receivethread.start()
-        sendthread.start()
-    except Exception as e:
-        print(str(e))
-        client.close()
-            #sys.exit();
-       
+
+    while True:
+        try:
+            client, addr = server.accept()
+            print(f"{addr} connected")
+            with clientlist_lock:
+                clients_copy = list(clientlist)
+            clienttoid = {}
+            clientlist.append(client)
+            client_handler = threading.Thread(target = sendmessages, args=(client, clienttoid, clientlist_lock))
+            client_handler.start()
+        except Exception as e:
+            print(str(e))
+            for client in clientlist:
+                client.close()
+                sys.exit()
+
 if __name__ == '__main__':
     main()

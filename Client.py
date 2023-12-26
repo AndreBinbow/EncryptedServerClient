@@ -3,7 +3,7 @@ import threading
 import sys
 import base64
 
-password = "SECRET"
+
 
 def string_to_binary(input_string):
     binary_representation = ''.join(format(ord(char), '08b') for char in input_string)
@@ -103,9 +103,11 @@ def sendmessages(socket):
 def main():
     client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     
-    address = input("Host ip/Port number (write as xx.xx.xx.xx, xxxx): ").split(",")
+    address = input("Host ip/Port number/passkey (write as xx.xx.xx.xx, xxxx,xxxxxx): ").split(",")
     host = address[0]
     port = int(address[1])
+    global password
+    password = address[2]
     try:
         client.connect((host, port))
            
